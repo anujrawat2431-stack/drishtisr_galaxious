@@ -25,7 +25,11 @@ FEATURES = 64
 NUM_BLOCKS = 8
 SCALE = 4
 EXPECTED_PARAMS = 927_876
-TILE_SIZE = 256
+
+# Small tiles keep memory low enough for a 512 MB server.
+# TILE_PAD is extra border read around each tile so tile edges blend in.
+TILE_SIZE = 64
+TILE_PAD = 16
 
 _model = None
 _device = None
@@ -92,7 +96,7 @@ def _infer_tile(model, device, tile: np.ndarray) -> np.ndarray:
     import torch
 
     x = torch.from_numpy(tile).unsqueeze(0).to(device)
-    with torch.no_grad():
+    with torch.inference_mode():
         y = model(x)
     return y.squeeze(0).cpu().numpy()
 
@@ -136,18 +140,34 @@ def run_super_resolution(input_path: str, output_path: str) -> dict:
         with rasterio.open(output_path, "w", **profile) as dst:
             for y0 in range(0, height, TILE_SIZE):
                 y1 = min(y0 + TILE_SIZE, height)
+
                 for x0 in range(0, width, TILE_SIZE):
                     x1 = min(x0 + TILE_SIZE, width)
 
+                    # Read a slightly bigger area so the tile edges get context
+                    ry0 = max(y0 - TILE_PAD, 0)
+                    ry1 = min(y1 + TILE_PAD, height)
+                    rx0 = max(x0 - TILE_PAD, 0)
+                    rx1 = min(x1 + TILE_PAD, width)
+
                     tile = src.read(
                         indexes=list(range(1, IN_CHANNELS + 1)),
-                        window=Window(x0, y0, x1 - x0, y1 - y0),
+                        window=Window(rx0, ry0, rx1 - rx0, ry1 - ry0),
                     ).astype(np.float32)
 
                     sr_tile = _infer_tile(model, device, tile)
 
+                    # Cut the extra border away again
+                    cy0 = (y0 - ry0) * SCALE
+                    cx0 = (x0 - rx0) * SCALE
+                    core = sr_tile[
+                        :,
+                        cy0 : cy0 + (y1 - y0) * SCALE,
+                        cx0 : cx0 + (x1 - x0) * SCALE,
+                    ]
+
                     dst.write(
-                        sr_tile,
+                        core,
                         window=Window(
                             x0 * SCALE,
                             y0 * SCALE,
