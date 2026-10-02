@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, File, UploadFile, HTTPException
@@ -19,62 +20,59 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/")
-async def upload_file(file: UploadFile = File(...)):
+def upload_file(file: UploadFile = File(...)):
 
     if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="No file selected"
-        )
+        raise HTTPException(status_code=400, detail="No file selected")
 
     filename = file.filename.lower()
 
-    allowed_extensions = [
-        ".tif",
-        ".tiff",
-        ".zip",
-    ]
+    allowed_extensions = [".tif", ".tiff", ".zip"]
 
     if not any(filename.endswith(ext) for ext in allowed_extensions):
         raise HTTPException(
             status_code=400,
-            detail="Only .tif, .tiff and .zip files are supported"
+            detail="Only .tif, .tiff and .zip files are supported",
         )
 
     file_path = UPLOAD_DIR / Path(file.filename).name
 
-    contents = await file.read()
-
-    with open(file_path, "wb") as buffer:
-        buffer.write(contents)
+    try:
+        # Copy straight to disk instead of loading the whole file in memory
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not save the uploaded file: {error}",
+        )
 
     response = {
         "message": "File uploaded successfully",
         "filename": file.filename,
-        "size": len(contents),
+        "size": file_path.stat().st_size,
         "path": str(file_path),
     }
 
     # Extract GeoTIFF metadata
     if filename.endswith(".tif") or filename.endswith(".tiff"):
         try:
-            metadata = get_raster_metadata(str(file_path))
-            response["metadata"] = metadata
-
+            response["metadata"] = get_raster_metadata(str(file_path))
         except Exception as error:
             response["metadata_error"] = str(error)
 
     return response
 
+
 @router.post("/preprocess/{filename}")
-async def preprocess_uploaded_file(filename: str):
+def preprocess_uploaded_file(filename: str):
 
     file_path = UPLOAD_DIR / Path(filename).name
 
     if not file_path.exists():
         raise HTTPException(
             status_code=404,
-            detail="File not found"
+            detail="File not found on the server. Please upload it again.",
         )
 
     if not (
@@ -83,7 +81,7 @@ async def preprocess_uploaded_file(filename: str):
     ):
         raise HTTPException(
             status_code=400,
-            detail="Preprocessing currently supports GeoTIFF files only"
+            detail="Preprocessing currently supports GeoTIFF files only",
         )
 
     try:
@@ -107,5 +105,5 @@ async def preprocess_uploaded_file(filename: str):
     except Exception as error:
         raise HTTPException(
             status_code=500,
-            detail=f"Preprocessing failed: {str(error)}"
+            detail=f"Preprocessing failed: {str(error)}",
         )
