@@ -7,6 +7,7 @@ scale (e.g. DN / 10000), output quality is not validated yet.
 """
 
 from pathlib import Path
+import os
 
 import numpy as np
 import rasterio
@@ -30,6 +31,9 @@ EXPECTED_PARAMS = 927_876
 # TILE_PAD is extra border read around each tile so tile edges blend in.
 TILE_SIZE = 64
 TILE_PAD = 16
+# Maximum image size (in pixels) allowed. 0 means no limit.
+# Set MAX_SR_PIXELS on the live server only, so your laptop stays unlimited.
+MAX_PIXELS = int(os.getenv("MAX_SR_PIXELS", "0"))
 
 _model = None
 _device = None
@@ -116,6 +120,12 @@ def run_super_resolution(input_path: str, output_path: str) -> dict:
             raise ValueError(
                 f"Input has {band_count} band(s); the model needs at least "
                 f"{IN_CHANNELS} (B02, B03, B04, B08)."
+            )
+        if MAX_PIXELS and width * height > MAX_PIXELS:
+            raise ValueError(
+                f"Image is {width}x{height}. The demo server can only process "
+                f"images up to about {MAX_PIXELS:,} pixels. "
+                "Please crop the image and try again."
             )
 
         out_h, out_w = height * SCALE, width * SCALE
