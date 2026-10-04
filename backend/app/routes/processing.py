@@ -1,9 +1,10 @@
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
+from app.services.preview_service import render_preview_png
 from app.services.sr_service import run_super_resolution, ModelNotAvailableError
 
 
@@ -163,4 +164,42 @@ def get_output_file(filename: str):
         path=file_path,
         media_type="image/tiff",
         filename=safe_filename,
+    )
+
+
+# --------------------------------------------------
+# Preview picture (PNG) of a processed GeoTIFF
+# --------------------------------------------------
+
+@router.get("/preview/{filename}")
+def get_preview(filename: str):
+
+    safe_filename = Path(filename).name
+
+    if not safe_filename.lower().endswith((".tif", ".tiff")):
+        raise HTTPException(
+            status_code=400,
+            detail="Previews are only available for GeoTIFF files",
+        )
+
+    file_path = PROCESSED_DIR / safe_filename
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"File not found: {safe_filename}",
+        )
+
+    try:
+        png = render_preview_png(str(file_path))
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not create the preview: {error}",
+        )
+
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "no-cache"},
     )
