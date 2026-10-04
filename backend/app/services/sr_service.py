@@ -6,8 +6,8 @@ that image's own min/max. If the model was trained on a fixed reflectance
 scale (e.g. DN / 10000), output quality is not validated yet.
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 import numpy as np
 import rasterio
@@ -31,6 +31,7 @@ EXPECTED_PARAMS = 927_876
 # TILE_PAD is extra border read around each tile so tile edges blend in.
 TILE_SIZE = 64
 TILE_PAD = 16
+
 # Maximum image size (in pixels) allowed. 0 means no limit.
 # Set MAX_SR_PIXELS on the live server only, so your laptop stays unlimited.
 MAX_PIXELS = int(os.getenv("MAX_SR_PIXELS", "0"))
@@ -105,10 +106,17 @@ def _infer_tile(model, device, tile: np.ndarray) -> np.ndarray:
     return y.squeeze(0).cpu().numpy()
 
 
-def run_super_resolution(input_path: str, output_path: str) -> dict:
+def run_super_resolution(
+    input_path: str,
+    output_path: str,
+    progress_callback=None,
+) -> dict:
     """
     Run 4x super-resolution on a preprocessed GeoTIFF and write the result
     tile by tile. Uses the first 4 bands (B02, B03, B04, B08).
+
+    progress_callback(done_tiles, total_tiles) is called after the model is
+    loaded (with done_tiles = 0) and again after every finished tile.
     """
     model = load_model()
     device = _device
@@ -121,6 +129,7 @@ def run_super_resolution(input_path: str, output_path: str) -> dict:
                 f"Input has {band_count} band(s); the model needs at least "
                 f"{IN_CHANNELS} (B02, B03, B04, B08)."
             )
+
         if MAX_PIXELS and width * height > MAX_PIXELS:
             raise ValueError(
                 f"Image is {width}x{height}. The demo server can only process "
@@ -129,6 +138,15 @@ def run_super_resolution(input_path: str, output_path: str) -> dict:
             )
 
         out_h, out_w = height * SCALE, width * SCALE
+
+        # Count the tiles first so we can report progress
+        tiles_x = (width + TILE_SIZE - 1) // TILE_SIZE
+        tiles_y = (height + TILE_SIZE - 1) // TILE_SIZE
+        total_tiles = tiles_x * tiles_y
+        done_tiles = 0
+
+        if progress_callback:
+            progress_callback(0, total_tiles)
 
         transform = src.transform * src.transform.scale(
             width / out_w, height / out_h
@@ -185,6 +203,10 @@ def run_super_resolution(input_path: str, output_path: str) -> dict:
                             (y1 - y0) * SCALE,
                         ),
                     )
+
+                    done_tiles += 1
+                    if progress_callback:
+                        progress_callback(done_tiles, total_tiles)
 
     return {
         "input_width": width,

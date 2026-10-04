@@ -21,6 +21,7 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 processing_state = {
     "status": "idle",
     "stage": "Waiting for input",
+    "progress": 0,
     "input_filename": None,
     "output_filename": None,
     "input_resolution": "10m",
@@ -32,20 +33,25 @@ class SuperResolutionRequest(BaseModel):
     filename: str
 
 
-# --------------------------------------------------
-# Processing Status
-# --------------------------------------------------
-
-@router.get("/status")
-def processing_status():
+def _state_response():
     return {
         "status": processing_state["status"],
         "stage": processing_state["stage"],
+        "progress": processing_state["progress"],
         "input_filename": processing_state["input_filename"],
         "output_filename": processing_state["output_filename"],
         "input_resolution": processing_state["input_resolution"],
         "target_resolution": processing_state["target_resolution"],
     }
+
+
+# --------------------------------------------------
+# Processing Status (the website polls this to fill the progress bar)
+# --------------------------------------------------
+
+@router.get("/status")
+def processing_status():
+    return _state_response()
 
 
 # --------------------------------------------------
@@ -70,17 +76,27 @@ def super_resolution(request: SuperResolutionRequest):
 
     # Mark as running before we start the (potentially slow) inference call.
     processing_state["status"] = "running"
-    processing_state["stage"] = "AI Super Resolution"
+    processing_state["stage"] = "Loading AI model"
+    processing_state["progress"] = 0
     processing_state["input_filename"] = filename
     processing_state["output_filename"] = None
 
     output_filename = f"{processed_file.stem}_sr_4x.tif"
     output_file = PROCESSED_DIR / output_filename
 
+    def report_progress(done_tiles: int, total_tiles: int):
+        # Stay at 99% until the file is completely written
+        percent = int(done_tiles * 100 / total_tiles) if total_tiles else 0
+        processing_state["progress"] = min(percent, 99)
+        processing_state["stage"] = (
+            f"Enhancing image ({done_tiles} of {total_tiles} tiles)"
+        )
+
     try:
         result = run_super_resolution(
             input_path=str(processed_file),
             output_path=str(output_file),
+            progress_callback=report_progress,
         )
     except ModelNotAvailableError as error:
         processing_state["status"] = "failed"
@@ -100,6 +116,7 @@ def super_resolution(request: SuperResolutionRequest):
 
     processing_state["status"] = "completed"
     processing_state["stage"] = "Completed"
+    processing_state["progress"] = 100
     processing_state["output_filename"] = output_filename
 
     return {
@@ -122,15 +139,7 @@ def super_resolution(request: SuperResolutionRequest):
 
 @router.get("/results")
 def get_results():
-
-    return {
-        "status": processing_state["status"],
-        "stage": processing_state["stage"],
-        "input_filename": processing_state["input_filename"],
-        "output_filename": processing_state["output_filename"],
-        "input_resolution": processing_state["input_resolution"],
-        "target_resolution": processing_state["target_resolution"],
-    }
+    return _state_response()
 
 
 # --------------------------------------------------
