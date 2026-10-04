@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -6,6 +7,7 @@ from pydantic import BaseModel
 
 from app.services.preview_service import render_preview_png
 from app.services.sr_service import run_super_resolution, ModelNotAvailableError
+from app.session import get_state, processed_dir
 
 
 router = APIRouter(
@@ -14,35 +16,23 @@ router = APIRouter(
 )
 
 
-PROCESSED_DIR = Path("processed")
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# Temporary project state
-processing_state = {
-    "status": "idle",
-    "stage": "Waiting for input",
-    "progress": 0,
-    "input_filename": None,
-    "output_filename": None,
-    "input_resolution": "10m",
-    "target_resolution": "≤4m",
-}
+# The small server can only enhance one image at a time
+_sr_lock = threading.Lock()
 
 
 class SuperResolutionRequest(BaseModel):
     filename: str
 
 
-def _state_response():
+def _state_response(state: dict):
     return {
-        "status": processing_state["status"],
-        "stage": processing_state["stage"],
-        "progress": processing_state["progress"],
-        "input_filename": processing_state["input_filename"],
-        "output_filename": processing_state["output_filename"],
-        "input_resolution": processing_state["input_resolution"],
-        "target_resolution": processing_state["target_resolution"],
+        "status": state["status"],
+        "stage": state["stage"],
+        "progress": state["progress"],
+        "input_filename": state["input_filename"],
+        "output_filename": state["output_filename"],
+        "input_resolution": state["input_resolution"],
+        "target_resolution": state["target_resolution"],
     }
 
 
@@ -51,8 +41,8 @@ def _state_response():
 # --------------------------------------------------
 
 @router.get("/status")
-def processing_status():
-    return _state_response()
+def processing_status(sid: str | None = None):
+    return _state_response(get_state(sid))
 
 
 # --------------------------------------------------
@@ -60,11 +50,14 @@ def processing_status():
 # --------------------------------------------------
 
 @router.post("/super-resolution")
-def super_resolution(request: SuperResolutionRequest):
+def super_resolution(request: SuperResolutionRequest, sid: str | None = None):
+
+    state = get_state(sid)
+    folder = processed_dir(sid)
 
     filename = Path(request.filename).name
 
-    processed_file = PROCESSED_DIR / filename
+    processed_file = folder / filename
 
     if not processed_file.exists():
         raise HTTPException(
@@ -75,63 +68,75 @@ def super_resolution(request: SuperResolutionRequest):
             ),
         )
 
-    # Mark as running before we start the (potentially slow) inference call.
-    processing_state["status"] = "running"
-    processing_state["stage"] = "Loading AI model"
-    processing_state["progress"] = 0
-    processing_state["input_filename"] = filename
-    processing_state["output_filename"] = None
-
-    output_filename = f"{processed_file.stem}_sr_4x.tif"
-    output_file = PROCESSED_DIR / output_filename
-
-    def report_progress(done_tiles: int, total_tiles: int):
-        # Stay at 99% until the file is completely written
-        percent = int(done_tiles * 100 / total_tiles) if total_tiles else 0
-        processing_state["progress"] = min(percent, 99)
-        processing_state["stage"] = (
-            f"Enhancing image ({done_tiles} of {total_tiles} tiles)"
+    if not _sr_lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Another image is being enhanced right now. "
+                "Please try again in a minute."
+            ),
         )
 
     try:
-        result = run_super_resolution(
-            input_path=str(processed_file),
-            output_path=str(output_file),
-            progress_callback=report_progress,
-        )
-    except ModelNotAvailableError as error:
-        processing_state["status"] = "failed"
-        processing_state["stage"] = "Model unavailable"
-        raise HTTPException(status_code=503, detail=str(error))
-    except ValueError as error:
-        processing_state["status"] = "failed"
-        processing_state["stage"] = "Invalid input"
-        raise HTTPException(status_code=400, detail=str(error))
-    except Exception as error:
-        processing_state["status"] = "failed"
-        processing_state["stage"] = "Inference error"
-        raise HTTPException(
-            status_code=500,
-            detail=f"Super resolution inference failed: {error}",
-        )
+        # Mark as running before we start the (potentially slow) inference call.
+        state["status"] = "running"
+        state["stage"] = "Loading AI model"
+        state["progress"] = 0
+        state["input_filename"] = filename
+        state["output_filename"] = None
 
-    processing_state["status"] = "completed"
-    processing_state["stage"] = "Completed"
-    processing_state["progress"] = 100
-    processing_state["output_filename"] = output_filename
+        output_filename = f"{processed_file.stem}_sr_4x.tif"
+        output_file = folder / output_filename
 
-    return {
-        "status": "completed",
-        "message": (
-            f"Super resolution completed: {result['input_width']}x"
-            f"{result['input_height']} -> {result['output_width']}x"
-            f"{result['output_height']} (x{result['scale_factor']})."
-        ),
-        "filename": filename,
-        "input_path": str(processed_file),
-        "output": output_filename,
-        "target_resolution": "≤4m",
-    }
+        def report_progress(done_tiles: int, total_tiles: int):
+            # Stay at 99% until the file is completely written
+            percent = int(done_tiles * 100 / total_tiles) if total_tiles else 0
+            state["progress"] = min(percent, 99)
+            state["stage"] = (
+                f"Enhancing image ({done_tiles} of {total_tiles} tiles)"
+            )
+
+        try:
+            result = run_super_resolution(
+                input_path=str(processed_file),
+                output_path=str(output_file),
+                progress_callback=report_progress,
+            )
+        except ModelNotAvailableError as error:
+            state["status"] = "failed"
+            state["stage"] = "Model unavailable"
+            raise HTTPException(status_code=503, detail=str(error))
+        except ValueError as error:
+            state["status"] = "failed"
+            state["stage"] = "Invalid input"
+            raise HTTPException(status_code=400, detail=str(error))
+        except Exception as error:
+            state["status"] = "failed"
+            state["stage"] = "Inference error"
+            raise HTTPException(
+                status_code=500,
+                detail=f"Super resolution inference failed: {error}",
+            )
+
+        state["status"] = "completed"
+        state["stage"] = "Completed"
+        state["progress"] = 100
+        state["output_filename"] = output_filename
+
+        return {
+            "status": "completed",
+            "message": (
+                f"Super resolution completed: {result['input_width']}x"
+                f"{result['input_height']} -> {result['output_width']}x"
+                f"{result['output_height']} (x{result['scale_factor']})."
+            ),
+            "filename": filename,
+            "input_path": str(processed_file),
+            "output": output_filename,
+            "target_resolution": "≤4m",
+        }
+    finally:
+        _sr_lock.release()
 
 
 # --------------------------------------------------
@@ -139,8 +144,8 @@ def super_resolution(request: SuperResolutionRequest):
 # --------------------------------------------------
 
 @router.get("/results")
-def get_results():
-    return _state_response()
+def get_results(sid: str | None = None):
+    return _state_response(get_state(sid))
 
 
 # --------------------------------------------------
@@ -148,11 +153,11 @@ def get_results():
 # --------------------------------------------------
 
 @router.get("/output/{filename}")
-def get_output_file(filename: str):
+def get_output_file(filename: str, sid: str | None = None):
 
     safe_filename = Path(filename).name
 
-    file_path = PROCESSED_DIR / safe_filename
+    file_path = processed_dir(sid) / safe_filename
 
     if not file_path.exists():
         raise HTTPException(
@@ -172,7 +177,7 @@ def get_output_file(filename: str):
 # --------------------------------------------------
 
 @router.get("/preview/{filename}")
-def get_preview(filename: str):
+def get_preview(filename: str, sid: str | None = None):
 
     safe_filename = Path(filename).name
 
@@ -182,7 +187,7 @@ def get_preview(filename: str):
             detail="Previews are only available for GeoTIFF files",
         )
 
-    file_path = PROCESSED_DIR / safe_filename
+    file_path = processed_dir(sid) / safe_filename
 
     if not file_path.exists():
         raise HTTPException(

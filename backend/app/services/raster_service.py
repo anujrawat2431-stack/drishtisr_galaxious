@@ -5,9 +5,6 @@ import rasterio
 from rasterio.windows import Window
 
 
-PROCESSED_DIR = Path("processed")
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-
 # Read the image a few rows at a time instead of all at once
 STRIP_ROWS = 256
 
@@ -47,10 +44,14 @@ def _clean(data):
     return np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
 
 
-def preprocess_raster(file_path: str):
+def preprocess_raster(file_path: str, output_dir: str):
+    """Normalize every band to 0-1 and save it in output_dir."""
+
+    output_folder = Path(output_dir)
+    output_folder.mkdir(parents=True, exist_ok=True)
 
     input_name = Path(file_path).stem
-    output_path = PROCESSED_DIR / f"{input_name}_processed.tif"
+    output_path = output_folder / f"{input_name}_processed.tif"
 
     with rasterio.open(file_path) as src:
 

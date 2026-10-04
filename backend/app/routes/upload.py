@@ -7,6 +7,7 @@ from app.services.raster_service import (
     get_raster_metadata,
     preprocess_raster,
 )
+from app.session import cleanup_old_sessions, processed_dir, upload_dir
 
 
 router = APIRouter(
@@ -15,12 +16,11 @@ router = APIRouter(
 )
 
 
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
 @router.post("/")
-def upload_file(file: UploadFile = File(...)):
+def upload_file(file: UploadFile = File(...), sid: str | None = None):
+
+    cleanup_old_sessions()
+    folder = upload_dir(sid)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
@@ -35,7 +35,7 @@ def upload_file(file: UploadFile = File(...)):
             detail="Only .tif, .tiff and .zip files are supported",
         )
 
-    file_path = UPLOAD_DIR / Path(file.filename).name
+    file_path = folder / Path(file.filename).name
 
     try:
         # Copy straight to disk instead of loading the whole file in memory
@@ -65,9 +65,9 @@ def upload_file(file: UploadFile = File(...)):
 
 
 @router.post("/preprocess/{filename}")
-def preprocess_uploaded_file(filename: str):
+def preprocess_uploaded_file(filename: str, sid: str | None = None):
 
-    file_path = UPLOAD_DIR / Path(filename).name
+    file_path = upload_dir(sid) / Path(filename).name
 
     if not file_path.exists():
         raise HTTPException(
@@ -85,7 +85,7 @@ def preprocess_uploaded_file(filename: str):
         )
 
     try:
-        result = preprocess_raster(str(file_path))
+        result = preprocess_raster(str(file_path), str(processed_dir(sid)))
 
         return {
             "message": "Raster preprocessing completed",

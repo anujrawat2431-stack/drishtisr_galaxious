@@ -1,9 +1,11 @@
+import { withSession } from "./session";
+
 const API_URL = import.meta.env.VITE_API_URL;
 
 async function apiRequest(endpoint: string, options?: RequestInit) {
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${endpoint}`, options);
+    response = await fetch(withSession(`${API_URL}${endpoint}`), options);
   } catch {
     throw new Error(
       "Cannot reach the server. It may be waking up - please wait a minute and try again.",

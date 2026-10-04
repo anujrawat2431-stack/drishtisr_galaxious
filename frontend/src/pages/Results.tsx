@@ -13,6 +13,7 @@ import {
   Upload,
 } from "lucide-react";
 import { getProcessingResults } from "../services/api";
+import { withSession } from "../services/session";
 
 interface ProcessingResult {
   status?: string;
@@ -61,11 +62,15 @@ export default function Results() {
   const targetResolution = result?.target_resolution || "≤4m";
 
   const outputUrl = outputFile
-    ? `${API_URL}/api/processing/output/${encodeURIComponent(outputFile)}`
+    ? withSession(
+        `${API_URL}/api/processing/output/${encodeURIComponent(outputFile)}`,
+      )
     : "";
 
   const previewUrl = (name: string) =>
-    `${API_URL}/api/processing/preview/${encodeURIComponent(name)}?v=${version}`;
+    `${withSession(
+      `${API_URL}/api/processing/preview/${encodeURIComponent(name)}`,
+    )}&v=${version}`;
 
   const inputPreviewUrl =
     result?.input_filename && version
