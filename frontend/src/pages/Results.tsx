@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CheckCircle2,
-  Clock3,
+  
   Download,
   FileImage,
   RefreshCw,
@@ -286,28 +286,7 @@ export default function Results() {
           </button>{" "}
         </div>{" "}
       </section>{" "}
-      {/* Integration Note */}{" "}
-      <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-6">
-        {" "}
-        <div className="flex items-start gap-3">
-          {" "}
-          <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />{" "}
-          <div>
-            {" "}
-            <h3 className="text-sm font-semibold text-text-primary">
-              {" "}
-              AI Integration Ready{" "}
-            </h3>{" "}
-            <p className="mt-1 text-sm leading-6 text-text-secondary">
-              {" "}
-              The frontend is already connected to the processing API. When the
-              AI team integrates the trained super-resolution model, the backend
-              can return the generated GeoTIFF filename without requiring
-              changes to this page.{" "}
-            </p>{" "}
-          </div>{" "}
-        </div>{" "}
-      </section>{" "}
+      
     </div>
   );
 }

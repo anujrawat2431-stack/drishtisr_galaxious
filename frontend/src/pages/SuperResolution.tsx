@@ -227,16 +227,7 @@ export default function SuperResolution() {
       </div>
 
       {/* Integration Note */}
-      <div className="rounded-xl border border-blue-100 bg-blue-50 p-5">
-        <p className="text-sm font-medium text-blue-900">
-          AI Integration Point
-        </p>
-        <p className="mt-1 text-sm leading-6 text-blue-700">
-          The backend endpoint is currently a placeholder. Your AI teammate can
-          later connect the trained Super Resolution model here without changing
-          this frontend page.
-        </p>
-      </div>
+      
     </div>
   );
 }
