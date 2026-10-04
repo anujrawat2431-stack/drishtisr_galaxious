@@ -31,6 +31,8 @@ def _state_response(state: dict):
         "progress": state["progress"],
         "input_filename": state["input_filename"],
         "output_filename": state["output_filename"],
+        "input_size": state.get("input_size"),
+        "output_size": state.get("output_size"),
         "input_resolution": state["input_resolution"],
         "target_resolution": state["target_resolution"],
     }
@@ -84,6 +86,8 @@ def super_resolution(request: SuperResolutionRequest, sid: str | None = None):
         state["progress"] = 0
         state["input_filename"] = filename
         state["output_filename"] = None
+        state["input_size"] = None
+        state["output_size"] = None
 
         output_filename = f"{processed_file.stem}_sr_4x.tif"
         output_file = folder / output_filename
@@ -122,6 +126,14 @@ def super_resolution(request: SuperResolutionRequest, sid: str | None = None):
         state["stage"] = "Completed"
         state["progress"] = 100
         state["output_filename"] = output_filename
+        state["input_size"] = {
+            "width": result["input_width"],
+            "height": result["input_height"],
+        }
+        state["output_size"] = {
+            "width": result["output_width"],
+            "height": result["output_height"],
+        }
 
         return {
             "status": "completed",

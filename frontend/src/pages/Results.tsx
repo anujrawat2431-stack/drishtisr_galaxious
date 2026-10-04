@@ -14,12 +14,15 @@ import {
 } from "lucide-react";
 import { getProcessingResults } from "../services/api";
 import { withSession } from "../services/session";
+import BeforeAfterSlider from "../components/BeforeAfterSlider";
 
 interface ProcessingResult {
   status?: string;
   stage?: string;
   input_filename?: string | null;
   output_filename?: string | null;
+  input_size?: { width: number; height: number } | null;
+  output_size?: { width: number; height: number } | null;
   input_resolution?: string;
   target_resolution?: string;
 }
@@ -33,6 +36,8 @@ export default function Results() {
   const [error, setError] = useState("");
   // Changes on every refresh so the browser loads fresh preview pictures
   const [version, setVersion] = useState(0);
+  // How the two images are compared
+  const [view, setView] = useState<"slider" | "side">("slider");
 
   const loadResults = async () => {
     try {
@@ -180,7 +185,76 @@ export default function Results() {
       </section>
 
       {/* Image Comparison */}
-      <section className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-text-primary">
+              Image comparison
+            </h2>
+            <p className="text-xs text-text-muted">
+              Compare the original with the AI enhanced image
+            </p>
+          </div>
+          <div className="inline-flex rounded-xl border border-border-subtle bg-bg-surface-secondary p-1">
+            <button
+              onClick={() => setView("slider")}
+              className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${
+                view === "slider"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Slider
+            </button>
+            <button
+              onClick={() => setView("side")}
+              className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${
+                view === "side"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Side by side
+            </button>
+          </div>
+        </div>
+
+        {view === "slider" ? (
+          <section className="rounded-2xl border border-border-subtle bg-bg-surface p-6 shadow-sm">
+            {inputPreviewUrl && outputPreviewUrl ? (
+              <>
+                <BeforeAfterSlider
+                  key={`${inputPreviewUrl}|${outputPreviewUrl}`}
+                  beforeUrl={inputPreviewUrl}
+                  afterUrl={outputPreviewUrl}
+                  beforeSize={result?.input_size}
+                  afterSize={result?.output_size}
+                />
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="break-all text-xs text-text-muted">
+                    {inputFile} → {outputFile}
+                  </p>
+                  <div className="flex items-center gap-4">
+                    <FullSizeLink url={outputPreviewUrl} />
+                    <button
+                      onClick={handleDownload}
+                      className="flex items-center gap-2 rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700"
+                    >
+                      <Download className="h-4 w-4" /> Download GeoTIFF
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <EmptyPreview
+                icon={Sparkles}
+                title="Waiting for AI output"
+                text="The before / after slider appears here after Super Resolution finishes."
+              />
+            )}
+          </section>
+        ) : (
+          <section className="grid gap-6 lg:grid-cols-2">
         {/* Original */}
         <ImagePanel
           title="Original Sentinel-2"
@@ -245,6 +319,8 @@ export default function Results() {
           )}
         </ImagePanel>
       </section>
+        )}
+      </div>
 
       {/* Actions */}
       <section className="rounded-2xl border border-border-subtle bg-bg-surface p-6 shadow-sm">
